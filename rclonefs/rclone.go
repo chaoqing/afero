@@ -14,7 +14,8 @@
 package rclonefs
 
 import (
-	"context"
+	"sort"
+	"syscall"
 
 	"os"
 	"time"
@@ -36,14 +37,6 @@ func New(client fs.Fs) afero.Fs {
 	return &Fs{vfs.New(client, nil)}
 }
 
-func NewRCloneFs(config string) afero.Fs {
-	if fs, err := fs.NewFs(context.Background(), config+":"); err == nil {
-		return New(fs)
-	} else {
-		panic(err)
-	}
-}
-
 func (s Fs) Name() string { return "rclonefs" }
 
 func (s Fs) Create(name string) (afero.File, error) {
@@ -57,7 +50,7 @@ func (s Fs) MkdirAll(path string, perm os.FileMode) error {
 		if dir.IsDir() {
 			return nil
 		}
-		return err
+		return nil
 	}
 
 	// Slow path: make sure parent exists and then call Mkdir for path.
@@ -73,22 +66,20 @@ func (s Fs) MkdirAll(path string, perm os.FileMode) error {
 
 	if j > 1 {
 		// Create parent
-		err = s.MkdirAll(path[0:j-1], perm)
-		if err != nil {
+		if err = s.MkdirAll(path[0:j-1], perm); err!=nil{
 			return err
 		}
 	}
 
 	// Parent now exists; invoke Mkdir and use its result.
-	err = s.Mkdir(path, perm)
-	if err != nil {
+	if err = s.Mkdir(path, perm); err != nil {
 		// Handle arguments like "foo/." by
 		// double-checking that directory doesn't exist.
-		dir, err1 := s.Stat(path)
-		if err1 == nil && dir.IsDir() {
+		if dir, err1 := s.Stat(path); err1 == nil && dir.IsDir() {
 			return nil
+		}else{
+			return err
 		}
-		return err
 	}
 	return nil
 }
@@ -106,9 +97,61 @@ func (s Fs) Remove(name string) error {
 }
 
 func (s Fs) RemoveAll(path string) error {
+	// Follow the same way as os.RemoveAll
+	if path == "" {
+		// fail silently to retain compatibility with previous behavior
+		// of RemoveAll. See issue 28830.
+		return nil
+	}
 
-	// TODO have a look at os.RemoveAll
-	// https://github.com/golang/go/blob/master/src/os/path.go#L66
+	// The rmdir system call does not permit removing ".",
+	// so we don't permit it either.
+	if path == "." || (len(path) >= 2 && path[len(path)-1] == '.' && os.IsPathSeparator(path[len(path)-2])) {
+		return &os.PathError{Op: "RemoveAll", Path: path, Err: syscall.EINVAL}
+	}
+
+	// Simple case: if Remove works, we're done.
+	err := s.VFS.Remove(path)
+	if err == nil || os.IsNotExist(err) {
+		return nil
+	}
+
+	fileList := make([]string, 0)
+	dirList := make([]string, 0)
+
+	listWalkFn := func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if info.IsDir() {
+			dirList = append(dirList, path)
+		}else{
+			fileList = append(fileList, path)
+		}
+		return nil
+	}
+
+	if err := afero.Walk(s, path, listWalkFn); err==nil{
+		for _, f := range fileList{
+			if e := s.Remove(f); e!=nil && !os.IsNotExist(e){
+				return e
+			}
+		}
+
+		sort.Slice(dirList, func(i, j int) bool {
+			return len(dirList[i]) > len(dirList[j])
+		})
+
+		for _, d := range dirList{
+			if e := s.Remove(d); e!=nil && !os.IsNotExist(e){
+				return e
+			}
+		}
+	}else {
+		return err
+	}
+
 	return nil
 }
 
@@ -121,14 +164,12 @@ func (s Fs) Stat(name string) (os.FileInfo, error) {
 }
 
 func (s Fs) Chmod(name string, mode os.FileMode) error {
-	//return s.VFS.Chmod(name, mode)
-	//todo
-	 return nil
+	// we do not support Chmod, silently return
+	return nil
 }
 
 func (s Fs) Chown(name string, uid, gid int) error {
-	//return s.VFS.Chown(name, uid, gid)
-	//todo
+	// we do not support Chmod, silently return
 	return nil
 }
 

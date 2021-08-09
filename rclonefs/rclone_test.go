@@ -22,5 +22,5 @@ func TestNewRCloneFs(t *testing.T) {
 		return nil
 	}
 
-	afero.Walk(fs, "/", walkFn)
+	_ = afero.Walk(fs, "/", walkFn)
 }
