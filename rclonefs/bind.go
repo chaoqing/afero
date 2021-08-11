@@ -2,8 +2,15 @@ package rclonefs
 
 import (
 	"context"
+	"fmt"
 	"github.com/rclone/rclone/fs"
 	"github.com/spf13/afero"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
 )
 
 func NewRCloneFs(section string) afero.Fs {
@@ -11,5 +18,196 @@ func NewRCloneFs(section string) afero.Fs {
 		return New(newFs)
 	} else {
 		panic(err)
+	}
+}
+
+type BindPathFs struct {
+	pathPrefix []string
+	bindFs []afero.Fs
+}
+
+type BindPathFile struct {
+	afero.File
+	path string
+}
+
+func (f *BindPathFile) Name() string {
+	return f.path
+}
+
+func NewBindPathFs(binds map[string]afero.Fs) afero.Fs {
+	pathPrefix := make([]string, 0, len(binds))
+	bindMap := make(map[string]string)
+
+	for k := range binds{
+		cleanPath := filepath.Clean(k)
+		bindMap[cleanPath] = k
+		if len(bindMap) == len(pathPrefix){
+			panic(fmt.Errorf("path %s is a duplicate of existing %s", k, cleanPath))
+		}
+
+		pathPrefix = append(pathPrefix, cleanPath)
+	}
+
+	sort.Slice(pathPrefix, func(i, j int) bool {
+		return len(pathPrefix[i]) > len(pathPrefix[j])
+	})
+
+	bindFs := make([]afero.Fs, 0, len(pathPrefix))
+
+	for _, k := range pathPrefix{
+		bindFs = append(bindFs, binds[bindMap[k]])
+	}
+
+	return &BindPathFs{pathPrefix: pathPrefix, bindFs: bindFs}
+}
+
+func (b *BindPathFs) realPath(name string) (fs afero.Fs, path string, err error) {
+	cleanPath := filepath.Clean(name)
+	for i, prefix := range b.pathPrefix{
+		if strings.HasPrefix(cleanPath, prefix){
+			return b.bindFs[i], path[len(prefix):], nil
+		}
+	}
+
+	return b, "", os.ErrNotExist
+}
+
+func (b *BindPathFs) Chtimes(name string, atime, mtime time.Time) (err error) {
+	if bindFs, n, err := b.realPath(name); err != nil {
+		return &os.PathError{Op: "chtimes", Path: name, Err: err}
+	}else{
+		// we may lost the exact filename if error return
+		return bindFs.Chtimes(n, atime, mtime)
+	}
+}
+
+func (b *BindPathFs) Chmod(name string, mode os.FileMode) (err error) {
+	if bindFs, n, err := b.realPath(name); err != nil {
+		return &os.PathError{Op: "chmod", Path: name, Err: err}
+	}else{
+		return bindFs.Chmod(n, mode)
+	}
+}
+
+func (b *BindPathFs) Chown(name string, uid, gid int) (err error) {
+	if bindFs, n, err := b.realPath(name); err != nil {
+		return &os.PathError{Op: "chown", Path: name, Err: err}
+	}else{
+		return bindFs.Chown(n, uid, gid)
+	}
+}
+
+func (b *BindPathFs) Name() string {
+	return "BindPathFs"
+}
+
+func (b *BindPathFs) Stat(name string) (fi os.FileInfo, err error) {
+	if bindFs, n, err := b.realPath(name); err != nil {
+		return nil, &os.PathError{Op: "stat", Path: name, Err: err}
+	}else{
+		return bindFs.Stat(n)
+	}
+}
+
+func (b *BindPathFs) Rename(oldName, newName string) (err error) {
+	if bindFsOld, oldPath, err := b.realPath(oldName); err != nil {
+		return &os.PathError{Op: "rename", Path: oldPath, Err: err}
+	}else if bindFsNew, newPath, err := b.realPath(newName); err != nil {
+		return &os.PathError{Op: "rename", Path: newPath, Err: err}
+	}else if &bindFsOld==&bindFsNew{
+		return bindFsOld.Rename(oldPath, newPath)
+	}else{
+		oldFile, err := bindFsOld.Open(oldPath)
+		if err != nil {
+			return &os.PathError{Op: "rename", Path: oldPath, Err: err}
+		}
+		defer oldFile.Close()
+
+		newFile, err := bindFsNew.Create(newPath)
+		if err != nil {
+			return &os.PathError{Op: "rename", Path: newPath, Err: err}
+		}
+		defer newFile.Close()
+
+		_, err = io.Copy(newFile, oldFile)
+		if err != nil {
+			return &os.PathError{Op: "rename", Path: newPath, Err: err}
+		}
+
+		err = bindFsOld.Remove(oldPath)
+		if err != nil {
+			return &os.PathError{Op: "rename", Path: oldPath, Err: err}
+		}
+	}
+
+	return nil
+}
+
+func (b *BindPathFs) RemoveAll(name string) (err error) {
+	if bindFs, name, err := b.realPath(name); err != nil {
+		return &os.PathError{Op: "remove_all", Path: name, Err: err}
+	}else{
+		return bindFs.RemoveAll(name)
+	}
+}
+
+func (b *BindPathFs) Remove(name string) (err error) {
+	if bindFs, name, err := b.realPath(name); err != nil {
+		return &os.PathError{Op: "remove", Path: name, Err: err}
+	}else{
+		return bindFs.Remove(name)
+	}
+}
+
+func (b *BindPathFs) OpenFile(name string, flag int, mode os.FileMode) (f afero.File, err error) {
+	if bindFs, bindName, err := b.realPath(name); err != nil {
+		return nil, &os.PathError{Op: "openfile", Path: bindName, Err: err}
+	}else{
+		bindFile, err := bindFs.OpenFile(bindName, flag, mode)
+		if err != nil {
+			return nil, err
+		}
+		return &BindPathFile{bindFile, name}, nil
+	}
+}
+
+func (b *BindPathFs) Open(name string) (f afero.File, err error) {
+	if bindFs, bindName, err := b.realPath(name); err != nil {
+		return nil, &os.PathError{Op: "open", Path: bindName, Err: err}
+	}else{
+		sourcef, err := bindFs.Open(bindName)
+		if err != nil {
+			return nil, err
+		}
+		return &BindPathFile{File: sourcef, path: name}, nil
+	}
+}
+
+func (b *BindPathFs) Mkdir(name string, mode os.FileMode) (err error) {
+	if bindFs, name, err := b.realPath(name); err != nil {
+		return &os.PathError{Op: "mkdir", Path: name, Err: err}
+	}else{
+		return bindFs.Mkdir(name, mode)
+	}
+}
+
+func (b *BindPathFs) MkdirAll(name string, mode os.FileMode) (err error) {
+	if bindFs, name, err := b.realPath(name); err != nil {
+		return &os.PathError{Op: "mkdir", Path: name, Err: err}
+	}else{
+		return bindFs.MkdirAll(name, mode)
+	}
+}
+
+func (b *BindPathFs) Create(name string) (f afero.File, err error) {
+	if bindFs, bindName, err := b.realPath(name); err != nil {
+		return nil, &os.PathError{Op: "create", Path: bindName, Err: err}
+	}else{
+		sourcef, err := bindFs.Create(bindName)
+		if err != nil {
+			return nil, err
+		}
+		return &BindPathFile{File: sourcef, path: name}, nil
 	}
 }

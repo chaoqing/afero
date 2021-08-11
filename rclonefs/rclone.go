@@ -37,7 +37,7 @@ func New(client fs.Fs) afero.Fs {
 	return &Fs{vfs.New(client, nil)}
 }
 
-func (s Fs) Name() string { return "rclonefs" }
+func (s Fs) Name() string { return "RCloneFs" }
 
 func (s Fs) Create(name string) (afero.File, error) {
 	return s.VFS.Create(name)
