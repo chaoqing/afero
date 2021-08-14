@@ -37,6 +37,14 @@ func (f *BindPathFile) Name() string {
 	return f.path
 }
 
+func NewBindPathFile(f afero.File, path string) afero.File {
+	if osFile, ok := f.(*os.File); ok && filepath.Clean(path)==filepath.Clean(osFile.Name()){
+		return osFile
+	}else{
+		return &BindPathFile{File: f, path: filepath.Clean(path)}
+	}
+}
+
 func NewBindPathFs(binds map[string]afero.Fs) afero.Fs {
 	pathPrefix := make([]string, 0, len(binds))
 	bindMap := make(map[string]string)
@@ -190,11 +198,11 @@ func (b *BindPathFs) OpenFile(name string, flag int, mode os.FileMode) (f afero.
 	if bindFs, n, err := b.realPath(name); err != nil {
 		return nil, &os.PathError{Op: "openfile", Path: name, Err: err}
 	}else{
-		bindFile, err := b.bindFs[bindFs].OpenFile(n, flag, mode)
+		file, err := b.bindFs[bindFs].OpenFile(n, flag, mode)
 		if err != nil {
 			return nil, err
 		}
-		return &BindPathFile{bindFile, name}, nil
+		return NewBindPathFile(file, name), nil
 	}
 }
 
@@ -210,17 +218,17 @@ func (b *BindPathFs) Open(name string) (f afero.File, err error) {
 			return nil, &os.PathError{Op: "open", Path: name, Err: err}
 		}
 	}else{
-		sourcef, err := b.bindFs[bindFs].Open(n)
+		file, err := b.bindFs[bindFs].Open(n)
 		if err != nil {
 			return nil, err
 		}
 		if unionFile!=nil{
 			return &afero.UnionFile{
 				Base: unionFile,
-				Layer: &BindPathFile{File: sourcef, path: name},
+				Layer: NewBindPathFile(file, name),
 			}, nil
 		}else{
-			return &BindPathFile{File: sourcef, path: name}, nil
+			return NewBindPathFile(file, name), nil
 		}
 	}
 }
@@ -245,10 +253,10 @@ func (b *BindPathFs) Create(name string) (f afero.File, err error) {
 	if bindFs, n, err := b.realPath(name); err != nil {
 		return nil, &os.PathError{Op: "create", Path: name, Err: err}
 	}else{
-		sourcef, err := b.bindFs[bindFs].Create(n)
+		file, err := b.bindFs[bindFs].Create(n)
 		if err != nil {
 			return nil, err
 		}
-		return &BindPathFile{File: sourcef, path: name}, nil
+		return NewBindPathFile(file, name), nil
 	}
 }

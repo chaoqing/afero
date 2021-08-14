@@ -58,4 +58,29 @@ func TestNewBindPathFs(t *testing.T) {
 
 	t.Logf("list all files inside home filesystem")
 	_ = afero.Walk(fsHome, "/", walkPrintFn)
+
+
+	osFs := afero.NewOsFs()
+	bindOSFs := NewBindPathFs(map[string]afero.Fs{
+		"/": osFs,
+		"/home": osFs,
+	})
+
+	if tmpFile, err := bindOSFs.Open("/tmp/xx"); err==nil{
+		defer tmpFile.Close()
+		t.Logf("root bind file name %s", tmpFile.Name())
+
+		if osTmpFile, ok := tmpFile.(*os.File); ok{
+			t.Logf("success with real os file name %s", osTmpFile.Name())
+		}
+	}
+
+	if tmpFile, err := bindOSFs.Open("/home/tmp/xx"); err==nil{
+		defer tmpFile.Close()
+		t.Logf("bindOSFs file name %s", tmpFile.Name())
+
+		if osTmpFile, ok := tmpFile.(*os.File); ok{
+			t.Errorf("should not happen %s", osTmpFile.Name())
+		}
+	}
 }
