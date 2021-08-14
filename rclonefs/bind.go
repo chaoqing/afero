@@ -76,6 +76,9 @@ func (b *BindPathFs) realPath(name string) (fsIndex int, path string, err error)
 	for i, prefix := range b.pathPrefix{
 		if strings.HasPrefix(cleanPath, prefix){
 			newPath := cleanPath[len(prefix):]
+			if prefix=="/"{
+				newPath = cleanPath
+			}
 			if newPath==""{
 				newPath = "/"
 			}

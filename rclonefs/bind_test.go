@@ -31,13 +31,31 @@ func TestNewBindPathFs(t *testing.T) {
 	fsHome := afero.NewMemMapFs()
 
 	_ = fsRoot.MkdirAll("/tmp/test", os.ModeDir)
-	_ = afero.WriteFile(fsRoot, "/tmp/test/hello.go", []byte("import os"), os.ModePerm)
+	_ = afero.WriteFile(fsRoot, "/tmp/test/hello.go", []byte("fsRoot"), os.ModePerm)
 
 	bindFs := NewBindPathFs(map[string]afero.Fs{
 		"/": fsRoot,
 		"/home": fsHome,
+		"/home/root": fsRoot,
 	})
 
-	fmt.Println("list all files inside bind filesystem")
+	_ = afero.WriteFile(bindFs, "/home/world.go", []byte("bindFs to fsHome"), os.ModePerm)
+	content, _ := afero.ReadFile(fsHome, "/world.go")
+	t.Logf("write test: '%s' == '%s' ", []byte("bindFs to fsHome"), content)
+
+	t.Logf("list all files inside bind filesystem")
 	_ = afero.Walk(bindFs, "/", walkPrintFn)
+
+	oldContent, _ := afero.ReadFile(bindFs, "/home/root/tmp/test/hello.go")
+	t.Logf("load test: '%s' == '%s' ", []byte("fsRoot"), oldContent)
+
+	_ = afero.WriteFile(bindFs, "/home/root/tmp/test/hello.go", []byte("bindFs /home/root"), os.ModePerm)
+	newContent, _ := afero.ReadFile(bindFs, "/tmp/test/hello.go")
+	t.Logf("write test: '%s' == '%s' ", []byte("bindFs /home/root"), newContent)
+
+	t.Logf("list all files inside root filesystem")
+	_ = afero.Walk(fsRoot, "/", walkPrintFn)
+
+	t.Logf("list all files inside home filesystem")
+	_ = afero.Walk(fsHome, "/", walkPrintFn)
 }
