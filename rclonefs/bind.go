@@ -22,6 +22,8 @@ func NewRCloneFs(section string) afero.Fs {
 	}
 }
 
+// BindPathFs works very much like Linux mount bind
+// bindPointLayer is read only filesystem which only contain bind directory hierarchical
 type BindPathFs struct {
 	bindPointLayer afero.Fs
 	pathPrefix []string
@@ -37,14 +39,17 @@ func (f *BindPathFile) Name() string {
 	return f.path
 }
 
+// NewBindPathFile return a file with a modified file path if necessary
 func NewBindPathFile(f afero.File, path string) afero.File {
-	if osFile, ok := f.(*os.File); ok && filepath.Clean(path)==filepath.Clean(osFile.Name()){
-		return osFile
+	if filepath.Clean(path)==filepath.Clean(f.Name()){
+		return f
 	}else{
 		return &BindPathFile{File: f, path: filepath.Clean(path)}
 	}
 }
 
+// NewBindPathFs serve the same functionality like Linux `/etc/fstab` by bind-mounting different afero filesystem into single one
+// Like `afero.BasePathFs` in reverse way, it remove a mount point prefix to access the underlining file
 func NewBindPathFs(binds map[string]afero.Fs) afero.Fs {
 	pathPrefix := make([]string, 0, len(binds))
 	bindMap := make(map[string]string)
@@ -223,6 +228,7 @@ func (b *BindPathFs) Open(name string) (f afero.File, err error) {
 			return nil, err
 		}
 		if unionFile!=nil{
+			// todo: we need a merger for UnionFile to handle Layer file overwrite Base directory case
 			return &afero.UnionFile{
 				Base: unionFile,
 				Layer: NewBindPathFile(file, name),

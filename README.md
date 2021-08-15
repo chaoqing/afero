@@ -252,6 +252,25 @@ backed file implementation. This can be used in other memory backed file
 systems with ease. Plans are to add a radix tree memory stored file
 system using InMemoryFile.
 
+## RClone Virtual File System
+
+[RClone](https://github.com/rclone/rclone) support do *FUSE* mount on different cloud storage providers.
+The RCloneFs create a wrapper of RClone provided "github.com/rclone/rclone/vfs" for joining afero FS family.
+
+An `BindPathFs` is also provided to do bind mount inside go instead of *FUSE* mount which require root permission.
+The `BindPathFs` is for binding RCloneFs purpose but designed for any afero supported FS.
+
+```go
+_ = rclonefs.SetConfigPath(".config/rclone/rclone.conf")
+
+bindFs := rclonefs.NewBindPathFs(map[string]afero.Fs{
+    "/": afero.NewOsFs(),
+    "/media": rclonefs.NewRCloneFs("ibm"),
+})
+
+_, err := bindFs.Create("/media/file.txt")
+```
+
 ## Network Interfaces
 
 ### SftpFs

@@ -22,7 +22,7 @@ import (
 
 	_ "github.com/rclone/rclone/backend/all"
 	"github.com/rclone/rclone/fs"
-	_ "github.com/rclone/rclone/fs/config"
+	"github.com/rclone/rclone/fs/config"
 	"github.com/rclone/rclone/fs/config/configfile"
 	"github.com/rclone/rclone/vfs"
 
@@ -177,8 +177,13 @@ func (s Fs) Chtimes(name string, atime time.Time, mtime time.Time) error {
 	return s.VFS.Chtimes(name, atime, mtime)
 }
 
-func init(){
-	//config.SetConfigPath("~/.config/rclone/rclone.conf")
+func SetConfigPath(path string) error {
+	err := config.SetConfigPath(path)
+	if err!=nil{
+		return err
+	}
 	//config.ClearConfigPassword()
 	configfile.Install()
+
+	return nil
 }

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"github.com/spf13/afero"
 	"os"
+	"os/user"
+	"path/filepath"
 	"testing"
 )
 
@@ -21,6 +23,8 @@ func walkPrintFn(path string, info os.FileInfo, err error) error {
 }
 
 func TestNewRCloneFs(t *testing.T) {
+	usr, _ := user.Current()
+	_ = SetConfigPath(filepath.Join(usr.HomeDir, ".config/rclone/rclone.conf"))
 	fs := NewRCloneFs("ibm")
 
 	_ = afero.Walk(fs, "/", walkPrintFn)
